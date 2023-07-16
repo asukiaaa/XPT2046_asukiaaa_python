@@ -1,11 +1,10 @@
-"""XPT2046 Touch module."""
-from time import sleep
-import digitalio
+from adafruit_bus_device import spi_device
+from digitalio import DigitalInOut
+from busio import SPI
+from typing import Optional
 
 
-class Touch(object):
-    """Serial interface for XPT2046 Touch Screen Controller."""
-
+class XPT2046(object):
     # Command constants from ILI9341 datasheet
     GET_X = 0b11010000  # X position
     GET_Y = 0b10010000  # Y position
@@ -16,129 +15,90 @@ class Touch(object):
     GET_BATTERY = 0b10100000  # Battery monitor
     GET_AUX = 0b11100000  # Auxiliary input to ADC
 
-    def __init__(self, spi, cs, int_pin=None, int_handler=None,
-                 width=240, height=320,
-                 x_min=100, x_max=1962, y_min=100, y_max=1900):
-        """Initialize touch screen controller.
+    coordinate: Optional[tuple[int, int]] = None
+    changed_to_release = False
+    changed_to_press = False
+    _rx_buf = bytearray(3)
+    _tx_buf = bytearray(3)
 
-        Args:
-            spi (Class Spi):  SPI interface for OLED
-            cs (Class Pin):  Chip select pin
-            int_pin (Class Pin):  Touch controller interrupt pin
-            int_handler (function): Handler for screen interrupt
-            width (int): Width of LCD screen
-            height (int): Height of LCD screen
-            x_min (int): Minimum x coordinate
-            x_max (int): Maximum x coordinate
-            y_min (int): Minimum Y coordinate
-            y_max (int): Maximum Y coordinate
-        """
-        self.spi = spi
-        self.cs = cs
-        #self.cs.direction = digitalio.Direction.OUTPUT #No longer needed with gpiozero 1.6.2
-        self.cs.value = False
-        #self.cs.init(self.cs.OUT, value=1)
-        self.rx_buf = bytearray(3)  # Receive buffer
-        self.tx_buf = bytearray(3)  # Transmit buffer
+    def __init__(self, spi: SPI, cs: DigitalInOut,
+                 width: int = 240, height: int = 320,
+                 x_raw_min: int = 100, x_raw_max: int = 1962,
+                 y_raw_min: int = 100, y_raw_max: int = 1900,
+                 rotation: int = 0, baudrate: int = 1000000):
+        self.spi_device = spi_device.SPIDevice(spi, cs, baudrate=baudrate)
         self.width = width
         self.height = height
+        if rotation % 90 != 0:
+            raise ValueError("rotation must be multiple of 90")
+        self.normalized_rotation = rotation % 360
         # Set calibration
-        self.x_min = x_min
-        self.x_max = x_max
-        self.y_min = y_min
-        self.y_max = y_max
-        self.x_multiplier = width / (x_max - x_min)
-        self.x_add = x_min * -self.x_multiplier
-        self.y_multiplier = height / (y_max - y_min)
-        self.y_add = y_min * -self.y_multiplier
+        self.x_raw_min = x_raw_min
+        self.x_raw_max = x_raw_max
+        self.y_raw_min = y_raw_min
+        self.y_raw_max = y_raw_max
+        self.x_multiplier = width / (x_raw_max - x_raw_min)
+        self.x_add = x_raw_min * -self.x_multiplier
+        self.y_multiplier = height / (y_raw_max - y_raw_min)
+        self.y_add = y_raw_min * -self.y_multiplier
 
-        if int_pin is not None:
-            self.int_pin = int_pin
-            #self.int_pin.direction = digitalio.Direction.INPUT #No longer needed with gpiozero 1.6.2
-            #self.int_pin.init(int_pin.IN)
-            self.int_handler = int_handler
-            self.int_locked = False
-            self.int_pin.when_pressed = self.int_press
-            self.int_pin.when_released = self.int_release
-            '''int_pin.irq(trigger=int_pin.IRQ_FALLING | int_pin.IRQ_RISING,
-                        handler=self.int_press) # idea: button.when_pressed = int_press and button.when_released = int_release'''
+    def update(self):
+        raw = self._read_touch_raw()
+        prev_coord = self.coordinate
+        if raw is not None:
+            normalized = self._normalize(raw)
+            self.coordinate = self._rotate(normalized)
+        else:
+            self.coordinate = None
+        if prev_coord is None and self.coordinate is not None:
+            self.changed_to_press = True
+            self.changed_to_release = False
+        elif prev_coord is not None and self.coordinate is None:
+            self.changed_to_press = False
+            self.changed_to_release = True
+        else:
+            self.changed_to_press = False
+            self.changed_to_release = False
 
-    def get_touch(self):
-        """Take multiple samples to get accurate touch reading."""
-        timeout = 2  # set timeout to 2 seconds
-        confidence = 5
-        buff = [[0, 0] for x in range(confidence)]
-        buf_length = confidence  # Require a confidence of 5 good samples
-        buffptr = 0  # Track current buffer position
-        nsamples = 0  # Count samples
-        while timeout > 0:
-            if nsamples == buf_length:
-                meanx = sum([c[0] for c in buff]) // buf_length
-                meany = sum([c[1] for c in buff]) // buf_length
-                dev = sum([(c[0] - meanx)**2 +
-                          (c[1] - meany)**2 for c in buff]) / buf_length
-                if dev <= 50:  # Deviation should be under margin of 50
-                    return self.normalize(meanx, meany)
-            # get a new value
-            sample = self.raw_touch()  # get a touch
-            if sample is None:
-                nsamples = 0    # Invalidate buff
-            else:
-                buff[buffptr] = sample  # put in buff
-                buffptr = (buffptr + 1) % buf_length  # Incr, until rollover
-                nsamples = min(nsamples + 1, buf_length)  # Incr. until max
+    def is_in_rect(self, rect: list[tuple[int, int]]) -> bool:
+        return is_coodinate_in_rect(self.coordinate, rect)
 
-            sleep(.05)
-            timeout -= .05
-        return None
+    def _normalize(self, pos: tuple[int, int]) -> tuple[int, int]:
+        x = int(self.x_multiplier * pos[0] + self.x_add)
+        y = int(self.y_multiplier * pos[1] + self.y_add)
+        return (x, y)
 
-    def int_press(self, pin):
-        """Send X,Y values to passed interrupt handler."""
-        if not self.int_locked:
-            self.int_locked = True  # Lock Interrupt
-            buff = self.raw_touch()
+    def _rotate(self, pos: tuple[int, int]) -> tuple[int, int]:
+        (x, y) = pos
+        if self.normalized_rotation == 90:
+            return (y, x)
+        elif self.normalized_rotation == 180:
+            return (self.width - x, y)
+        elif self.normalized_rotation == 270:
+            return (self.height - y, self.width - x)
+        else:
+            return (x, self.height - y)
 
-            if buff is not None:
-                x, y = self.normalize(*buff)
-                self.int_handler(x, y)
-            sleep(.1)  # Debounce falling edge
-    
-    def int_release(self, pin):
-        """Send X,Y values to passed interrupt handler."""
-        if self.int_locked:
-            sleep(.1)  # Debounce rising edge
-            self.int_locked = False  # Unlock interrupt
-
-    def normalize(self, x, y):
-        """Normalize mean X,Y values to match LCD screen."""
-        x = int(self.x_multiplier * x + self.x_add)
-        y = int(self.y_multiplier * y + self.y_add)
-        return x, y
-
-    def raw_touch(self):
-        """Read raw X,Y touch values.
-
-        Returns:
-            tuple(int, int): X, Y
-        """
-        x = self.send_command(self.GET_X)
-        y = self.send_command(self.GET_Y)
-        if self.x_min <= x <= self.x_max and self.y_min <= y <= self.y_max:
+    def _read_touch_raw(self) -> Optional[tuple[int, int]]:
+        x = self._send_command(self.GET_X)
+        y = self._send_command(self.GET_Y)
+        if self.x_raw_min <= x <= self.x_raw_max and \
+                self.y_raw_min <= y <= self.y_raw_max:
             return (x, y)
         else:
             return None
 
-    def send_command(self, command):
-        """Write command to XT2046 (MicroPython).
+    def _send_command(self, command):
+        self._tx_buf[0] = command
+        with self.spi_device as spi:
+            spi.write_readinto(self._tx_buf, self._rx_buf)
+        return (self._rx_buf[1] << 4) | (self._rx_buf[2] >> 4)
 
-        Args:
-            command (byte): XT2046 command code.
-        Returns:
-            int: 12 bit response
-        """
-        self.tx_buf[0] = command
-        self.cs.value = True
-        self.spi.write_readinto(self.tx_buf, self.rx_buf)
-        self.cs.value = False
 
-        return (self.rx_buf[1] << 4) | (self.rx_buf[2] >> 4)
+def is_coodinate_in_rect(pos: Optional[tuple[int, int]], rect: list[tuple[int, int]]) -> bool:
+    if pos is None:
+        return False
+    p_left_up = rect[0]
+    p_right_down = rect[1]
+    return p_left_up[0] <= pos[0] <= p_right_down[0] and \
+        p_left_up[1] <= pos[1] <= p_right_down[1]
