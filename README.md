@@ -1,49 +1,57 @@
-# XPT2046-Python
+# XPT2046_asukiaaa_python
+
 Python library for XPT2046 Touchscreen.
-
-This library is the same as [rdagger](https://github.com/rdagger/micropython-ili9341/blob/master/xpt2046.py)'s, but adapted to work with pure Python on Raspberry Pi.
-
-## SPI and GPIOs
-SPI must be from [busio]()'s Adafruit CircuitPython library.
-GPIOs must be from [gpiozero](https://gpiozero.readthedocs.io/en/stable/index.html) library.
+This library references [Luca8991/XPT2046-Python](https://github.com/Luca8991/XPT2046-Python) and [Adafruit_CircuitPython_RGB_Display](https://github.com/adafruit/Adafruit_CircuitPython_RGB_Display).
 
 ## Usage
-You must initialize the SPI. In this example we will use the auxiliary SPI of the Raspberry Pi (NOTE: you have to enable it in the `/boot/config.txt` configuration file, see [here](https://raspberrypi.stackexchange.com/a/56503)).
 
-Wiring:
+### Enable SPI for Raspberry Pi
+
+```sh
+sudo raspi-config nonint do_spi 0
+```
+
+No need to reboot.
+
+### Wiring
 
 | Raspberri Pi  | <--> | XPT2046 |
 | :------------ |:---------------:| -----:|
-| SCLK_1 (GPIO21) | <--> | CLK |
-| CE_1 (GPIO17) | <--> | CS |
-| MOSI_1 (GPIO20) | <--> | DIN |
-| MISO_1 (GPIO19) | <--> | DO |
-| GPIO26 | <--> | IRQ |
+| MOSI (GPIO10) | <--> | DIN |
+| MISO (GPIO9) | <--> | DO |
+| SCLK (GPIO11) | <--> | CLK |
+| GPIO7 or any | <--> | CS |
+| 3V3 | <--> | VCC |
+| GND | <--> | GND |
 
-Code, same as in [touch-test.py](https://github.com/Luca8991/XPT2046-Python/blob/main/touch-test.py) file:
+This library does not use IRQ pin.
 
-    from xpt2046 import Touch
-    from gpiozero import Button, DigitalOutputDevice
-    import board
-    import busio
-    from time import sleep
-	
-	# touch callback
-    def touchscreen_press(x, y):
-        print(x,y)
+Code, same as in [tests/print_touch.py](https://github.com/asukiaaa/XPT2046_asukiaaa_python/blob/main/tests/print_touch.py) file:
 
-    cs = DigitalOutputDevice(17)
-    clk = board.SCLK_1		# same as writing 21
-    mosi = board.MOSI_1	# same as writing 20
-    miso = board.MISO_1	# same as writing 19
-    irq = Button(26)
+```py
+from XPT2046_asukiaaa_python import XPT2046
+import board
+import busio
+from digitalio import DigitalInOut
+from time import sleep
 
-    spi = busio.SPI(clk, mosi, miso)	# auxiliary SPI
+cs = DigitalInOut(board.D7)
+spi = busio.SPI(board.SCLK, board.MOSI, board.MISO)
+touch = XPT2046(spi, cs=cs)
 
-    xpt = Touch(spi, cs=cs, int_pin=irq, int_handler=touchscreen_press)
+print("start monitoring touch")
 
-    while True:
-        #print(xpt.get_touch()) # to get the (x, y) coords when you desire
-        sleep(.01)
+while True:
+    touch.update()
+    if touch.coordinate is not None:
+        print(touch.coordinate)
+    sleep(.01)
+```
 
-Tested on Raspberry Pi Zero W, used [this](https://www.amazon.it/gp/product/B087C3KC8F/) LCD + Touchscreen module
+## License
+
+MIT
+
+## References
+
+- [Packaging Python Projects](https://packaging.python.org/en/latest/tutorials/packaging-projects/)

@@ -1,7 +1,7 @@
 from adafruit_bus_device import spi_device
 from digitalio import DigitalInOut
 from busio import SPI
-from typing import Optional
+from typing import Optional, Union
 
 
 class XPT2046(object):
@@ -16,6 +16,7 @@ class XPT2046(object):
     GET_AUX = 0b11100000  # Auxiliary input to ADC
 
     coordinate: Optional[tuple[int, int]] = None
+    prev_coordinate: Optional[tuple[int, int]] = None
     changed_to_release = False
     changed_to_press = False
     _rx_buf = bytearray(3)
@@ -44,24 +45,27 @@ class XPT2046(object):
 
     def update(self):
         raw = self._read_touch_raw()
-        prev_coord = self.coordinate
+        self.prev_coordinate = self.coordinate
         if raw is not None:
             normalized = self._normalize(raw)
             self.coordinate = self._rotate(normalized)
         else:
             self.coordinate = None
-        if prev_coord is None and self.coordinate is not None:
+        if self.prev_coordinate is None and self.coordinate is not None:
             self.changed_to_press = True
             self.changed_to_release = False
-        elif prev_coord is not None and self.coordinate is None:
+        elif self.prev_coordinate is not None and self.coordinate is None:
             self.changed_to_press = False
             self.changed_to_release = True
         else:
             self.changed_to_press = False
             self.changed_to_release = False
 
-    def is_in_rect(self, rect: list[tuple[int, int]]) -> bool:
+    def is_in_rect(self, rect: tuple[tuple[float, float], tuple[float, float]]) -> bool:
         return is_coodinate_in_rect(self.coordinate, rect)
+
+    def prev_was_in_rect(self, rect: tuple[tuple[float, float], tuple[float, float]]) -> bool:
+        return is_coodinate_in_rect(self.prev_coordinate, rect)
 
     def _normalize(self, pos: tuple[int, int]) -> tuple[int, int]:
         x = int(self.x_multiplier * pos[0] + self.x_add)
@@ -95,10 +99,22 @@ class XPT2046(object):
         return (self._rx_buf[1] << 4) | (self._rx_buf[2] >> 4)
 
 
-def is_coodinate_in_rect(pos: Optional[tuple[int, int]], rect: list[tuple[int, int]]) -> bool:
+def is_coodinate_in_rect(pos: Optional[tuple[float, float]],
+                         rect: tuple[tuple[float, float], tuple[float, float]],
+                         #  rect: Union[tuple[float, float, float, float],
+                         #              tuple[tuple[float, float], tuple[float, float]]],
+                         ) -> bool:
     if pos is None:
         return False
     p_left_up = rect[0]
     p_right_down = rect[1]
+    # p_left_up: tuple[float, float]
+    # p_right_down: tuple[float, float]
+    # if type(rect[0]) in (float, int):
+    #     p_left_up = (rect[0], rect[1])
+    #     p_right_down = (rect[2], rect[3])
+    # else:
+    #     p_left_up = rect[0]
+    #     p_right_down = rect[1]
     return p_left_up[0] <= pos[0] <= p_right_down[0] and \
         p_left_up[1] <= pos[1] <= p_right_down[1]
