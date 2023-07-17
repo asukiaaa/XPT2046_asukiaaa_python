@@ -5,6 +5,11 @@ This library references [Luca8991/XPT2046-Python](https://github.com/Luca8991/XP
 
 ## Usage
 
+### Installation
+```sh
+pip install XPT2046-asukiaaa-python
+```
+
 ### Enable SPI for Raspberry Pi
 
 ```sh
