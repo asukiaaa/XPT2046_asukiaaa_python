@@ -59,4 +59,6 @@ MIT
 
 ## References
 
+- [抵抗膜式タッチ検知IC XPT2046をpythonで扱うライブラリXPT2046-asukiaaa-pythonの紹介](https://asukiaaa.blogspot.com/2023/07/introduction-of-touch-handling-library-xpt2046-asukiaaa-python.html)
+- [Raspberry Piでpythonを通して抵抗膜式のタッチパネルを動かしてみた（Luca8991/XPT2046-Python利用）](https://asukiaaa.blogspot.com/2023/07/use-touch-lcd-by-raspberry-pi-with-python.html)
 - [Packaging Python Projects](https://packaging.python.org/en/latest/tutorials/packaging-projects/)
