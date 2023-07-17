@@ -58,18 +58,20 @@ while True:
     touch.update()
     if touch.coordinate is not None or touch.prev_coordinate is not None:
         target_coordinate = touch.coordinate
-        r = 2
         color_point = COLOR_WHITE
-        color_rect = COLOR_GRAY
         if touch.changed_to_press:
             color_point = COLOR_RED
         elif touch.changed_to_release:
             color_point = COLOR_BLUE
             target_coordinate = touch.prev_coordinate
+        (x, y) = target_coordinate
+        r = 2
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=color_point)
+        color_rect = COLOR_GRAY
         if touch.is_in_rect(rect_detect):
             color_rect = COLOR_WHITE_GRAY
-        (x, y) = target_coordinate
-        draw.ellipse((x - 2, y - 2, x + 2, y + 2), fill=color_point)
+        elif touch.changed_to_release and touch.prev_was_in_rect(rect_detect):
+            color_rect = COLOR_GREEN
         draw.rectangle(rect_detect, outline=color_rect)
         display.image(image)
     time.sleep(.01)
